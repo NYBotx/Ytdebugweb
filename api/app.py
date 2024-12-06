@@ -1,16 +1,16 @@
-from flask import Flask, render_template, request, send_from_directory, jsonify
+from flask import Flask, render_template, request, jsonify
 from pytube import YouTube
 import os
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# Directory to save downloaded files
-DOWNLOAD_FOLDER = os.path.join(os.getcwd(), 'static', 'downloads')
+# Temporary directory for Vercel (using /tmp to store downloads)
+DOWNLOAD_FOLDER = '/tmp/downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
 
@@ -55,9 +55,10 @@ def download_video():
         filename = request.json.get("filename")
 
         yt = YouTube(url)
-
         stream = yt.streams.get_by_itag(itag)
-        safe_filename = secure_filename(filename + "." + stream.subtype)
+
+        # Generating safe filename
+        safe_filename = secure_filename(f"{filename}.{stream.subtype}")
         filepath = os.path.join(DOWNLOAD_FOLDER, safe_filename)
 
         # Download the stream
@@ -74,4 +75,4 @@ def download_file(filename):
 
 if __name__ == "__main__":
     app.run(debug=True)
-        
+            
