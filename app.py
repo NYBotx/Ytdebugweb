@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, render_template, request, send_from_directory, jsonify
 from pytube import YouTube
 import os
 from werkzeug.utils import secure_filename
@@ -10,64 +10,68 @@ DOWNLOAD_FOLDER = os.path.join(os.getcwd(), 'static', 'downloads')
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# Allowed file extensions for security
-ALLOWED_EXTENSIONS = {'mp4', 'webm'}
-
-# Function to check allowed file extensions
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# Download function to handle video/audio
-def download_video(url, download_type, quality, filename):
-    yt = YouTube(url)
-
-    stream = None
-    if download_type == 'video':
-        # Check if the video has audio + video stream
-        if quality == '1080p':
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').get_by_resolution("1080p")
-        elif quality == '720p':
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').get_by_resolution("720p")
-        elif quality == '480p':
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').get_by_resolution("480p")
-        elif quality == '360p':
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').get_by_resolution("360p")
-        elif quality == 'audio':
-            stream = yt.streams.filter(only_audio=True).first()
-    elif download_type == 'audio':
-        stream = yt.streams.filter(only_audio=True, file_extension='mp4').first()
-
-    # Download the stream
-    if stream:
-        safe_filename = secure_filename(filename + '.' + stream.subtype)
-        stream.download(output_path=DOWNLOAD_FOLDER, filename=safe_filename)
-        return safe_filename
-    return None
-
 @app.route("/", methods=["GET", "POST"])
 def index():
-    if request.method == "POST":
-        url = request.form['url']
-        download_type = request.form['download_type']
-        quality = request.form['quality']
-        filename = request.form['filename']
+    return render_template("index.html")
 
-        if url and filename:
-            try:
-                # Download the video or audio
-                downloaded_file = download_video(url, download_type, quality, filename)
-                if downloaded_file:
-                    return render_template("index.html", download_link=f"/download/{downloaded_file}")
-                else:
-                    return render_template("index.html", error="Error: Unable to download the video/audio.")
-            except Exception as e:
-                return render_template("index.html", error=f"Error: {str(e)}")
-    return render_template("index.html", download_link=None)
+@app.route("/check", methods=["POST"])
+def check_video():
+    """Fetch video details and quality options."""
+    try:
+        url = request.json.get("url")
+        yt = YouTube(url)
 
-@app.route("/download/<filename>")
+        # Check if the video is live
+        if yt.length == 0:
+            return jsonify({"error": "Live videos are not supported at this time."})
+
+        # Fetch available streams
+        streams = yt.streams.filter(file_extension="mp4")
+        quality_options = [
+            {
+                "itag": stream.itag,
+                "resolution": stream.resolution,
+                "type": "video" if stream.includes_video_track else "audio",
+                "has_audio": stream.includes_audio_track,
+                "url": stream.url,
+            }
+            for stream in streams
+        ]
+
+        return jsonify({
+            "title": yt.title,
+            "thumbnail": yt.thumbnail_url,
+            "qualities": quality_options,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route("/download", methods=["POST"])
+def download_video():
+    """Download the selected stream."""
+    try:
+        url = request.json.get("url")
+        itag = request.json.get("itag")
+        filename = request.json.get("filename")
+
+        yt = YouTube(url)
+
+        stream = yt.streams.get_by_itag(itag)
+        safe_filename = secure_filename(filename + "." + stream.subtype)
+        filepath = os.path.join(DOWNLOAD_FOLDER, safe_filename)
+
+        # Download the stream
+        stream.download(output_path=DOWNLOAD_FOLDER, filename=safe_filename)
+
+        return jsonify({"filepath": filepath, "filename": safe_filename})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route("/download-file/<filename>")
 def download_file(filename):
-    # Send the file to the user for download
+    """Serve the downloaded file."""
     return send_from_directory(DOWNLOAD_FOLDER, filename)
 
 if __name__ == "__main__":
     app.run(debug=True)
+        
